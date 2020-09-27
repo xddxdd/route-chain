@@ -299,35 +299,39 @@ static void loop(const int fd) {
                         if (masked_daddr != masked_ipblk) continue;
                     }
 
-                    if (ip_blks[i].prefix_len > 32 && ip_blks[i].prefix_len <= 64) {
-                        masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[1])
-                                & (0xffffffff << (64 - ip_blks[i].prefix_len));
-                        masked_ipblk = ntohl(ip_blks[i].addr_v6[1])
-                                & (0xffffffff << (64 - ip_blks[i].prefix_len));
-                        if (masked_daddr != masked_ipblk) continue;
-                    } else {
-                        masked_daddr = pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[1];
-                        masked_ipblk = ip_blks[i].addr_v6[1];
-                        if (masked_daddr != masked_ipblk) continue;
+                    if (ip_blks[i].prefix_len > 32) {
+                        if (ip_blks[i].prefix_len <= 64) {
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[1])
+                                    & (0xffffffff << (64 - ip_blks[i].prefix_len));
+                            masked_ipblk = ntohl(ip_blks[i].addr_v6[1])
+                                    & (0xffffffff << (64 - ip_blks[i].prefix_len));
+                            if (masked_daddr != masked_ipblk) continue;
+                        } else {
+                            masked_daddr = pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[1];
+                            masked_ipblk = ip_blks[i].addr_v6[1];
+                            if (masked_daddr != masked_ipblk) continue;
+                        }
                     }
 
-                    if (ip_blks[i].prefix_len > 64 && ip_blks[i].prefix_len <= 96) {
-                        masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[2])
-                                & (0xffffffff << (96 - ip_blks[i].prefix_len));
-                        masked_ipblk = ntohl(ip_blks[i].addr_v6[2])
-                                & (0xffffffff << (96 - ip_blks[i].prefix_len));
-                        if (masked_daddr != masked_ipblk) continue;
+                    if (ip_blks[i].prefix_len > 64) {
+                        if (ip_blks[i].prefix_len <= 96) {
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[2])
+                                    & (0xffffffff << (96 - ip_blks[i].prefix_len));
+                            masked_ipblk = ntohl(ip_blks[i].addr_v6[2])
+                                    & (0xffffffff << (96 - ip_blks[i].prefix_len));
+                            if (masked_daddr != masked_ipblk) continue;
 
-                    } else {
-                        masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[2]);
-                        masked_ipblk = ntohl(ip_blks[i].addr_v6[2]);
-                        if (masked_daddr != masked_ipblk) continue;
+                        } else {
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[2]);
+                            masked_ipblk = ntohl(ip_blks[i].addr_v6[2]);
+                            if (masked_daddr != masked_ipblk) continue;
 
-                        masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[3])
-                                & (0xffffffff << (128 - ip_blks[i].prefix_len));
-                        masked_ipblk = ntohl(ip_blks[i].addr_v6[3])
-                                & (0xffffffff << (128 - ip_blks[i].prefix_len));
-                        if (masked_daddr != masked_ipblk) continue;
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[3])
+                                    & (0xffffffff << (128 - ip_blks[i].prefix_len));
+                            masked_ipblk = ntohl(ip_blks[i].addr_v6[3])
+                                    & (0xffffffff << (128 - ip_blks[i].prefix_len));
+                            if (masked_daddr != masked_ipblk) continue;
+                        }
                     }
 
                     /* Adding to higher digits is not implemented, but unlikely necessary anyway */
