@@ -4,7 +4,11 @@ A small app to generate a long path in traceroute.
 
 ## Usage
 
-Run `make` to compile the app, and run `./main 192.168.0.1/24 192.0.0.1/24 fc00::/64 fd00::/64`.
+Run `make` to compile the app.
+
+Optionally run `make install` to copy the app to `/usr/local/bin`.
+
+Run `./route-chain 192.168.0.1/24 192.0.0.1/24 fc00::/64 fd00::/64`.
 
 Any number of CIDRs is accepted as parameter.
 
