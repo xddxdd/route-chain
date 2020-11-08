@@ -1,0 +1,32 @@
+language: c
+os: linux
+dist: focal
+compiler: gcc
+
+addons:
+  apt:
+    update: true
+    packages:
+      - "musl-dev"
+      - "musl-tools"
+
+before_install:
+  - git clone https://github.com/sabotage-linux/kernel-headers.git
+
+script:
+  - make CC="musl-gcc -I kernel-headers/x86_64/include" static
+
+deploy:
+  provider: releases
+  token: $GITHUB_SECRET
+  file:
+    - "route-chain"
+  overwrite: true
+  skip_cleanup: true
+  tag_name: release
+
+  name: "Musl-libc static linked binary"
+  release_notes: "Binary automatically compiled and statically linked against musl-libc. Ready to use on x86_64 systems."
+
+  on:
+    branch: master
