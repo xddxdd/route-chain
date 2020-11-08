@@ -151,11 +151,11 @@ static uint16_t checksum_calc_ipv6_phdr(const struct ip6_hdr *ip6, const void* b
     const uint16_t* b = buf;
 
     for (uint32_t i = 0; i < 8; i++) {
-        cksum += ip6->ip6_src.__in6_u.__u6_addr16[i];
-        cksum += ip6->ip6_dst.__in6_u.__u6_addr16[i];
+        cksum += ip6->ip6_src.s6_addr16[i];
+        cksum += ip6->ip6_dst.s6_addr16[i];
     }
-    cksum += ip6->ip6_ctlun.ip6_un1.ip6_un1_plen;
-    cksum += ip6->ip6_ctlun.ip6_un1.ip6_un1_nxt << 8;
+    cksum += ip6->ip6_plen;
+    cksum += ip6->ip6_nxt << 8;
 
     for (uint32_t i = 0; i < size / 2; i++) {
         cksum += b[i];
@@ -248,10 +248,10 @@ static void loop(const int fd) {
                 pkt_len = 56;
                 if (pkt_len != write(fd, &pkt->ipv4_padding, pkt_len)) DIE();
             }
-        } else if(((pkt->ipv6_hdr.ip6_ctlun.ip6_un1.ip6_un1_flow & 0xf0) >> 4) == 6) {
+        } else if(((pkt->ipv6_hdr.ip6_flow & 0xf0) >> 4) == 6) {
             /* Only packets without IP options is supported */
             if (
-                (pkt->ipv6_hdr.ip6_ctlun.ip6_un1.ip6_un1_nxt == IPPROTO_ICMPV6)
+                (pkt->ipv6_hdr.ip6_nxt == IPPROTO_ICMPV6)
                 && (pkt->icmp6_hdr.type == ICMP6_ECHO_REQUEST)
             ) {
                 /* swap src/dst address */
@@ -272,10 +272,10 @@ static void loop(const int fd) {
 
                 /* populate icmp time exceed header */
                 memset(&pkt->ipv6_padding, 0, 48);
-                pkt->ipv6_padding.ip6_ctlun.ip6_un1.ip6_un1_flow = 0x60;
-                pkt->ipv6_padding.ip6_ctlun.ip6_un1.ip6_un1_plen = htons(56);
-                pkt->ipv6_padding.ip6_ctlun.ip6_un1.ip6_un1_nxt = IPPROTO_ICMPV6;
-                pkt->ipv6_padding.ip6_ctlun.ip6_un1.ip6_un1_hlim = 255;
+                pkt->ipv6_padding.ip6_flow = 0x60;
+                pkt->ipv6_padding.ip6_plen = htons(56);
+                pkt->ipv6_padding.ip6_nxt = IPPROTO_ICMPV6;
+                pkt->ipv6_padding.ip6_hlim = 255;
 
                 /* copy over source addr as dest addr*/
                 memcpy(&pkt->ipv6_padding.ip6_dst, &pkt->ipv6_hdr.ip6_src, IPV6_ADDR_LEN);
@@ -288,26 +288,26 @@ static void loop(const int fd) {
                     uint32_t masked_ipblk;
 
                     if (ip_blks[i].prefix_len <= 32) {
-                        masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[0])
+                        masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[0])
                                 & (0xffffffff << (32 - ip_blks[i].prefix_len));
                         masked_ipblk = ntohl(ip_blks[i].addr_v6[0])
                                 & (0xffffffff << (32 - ip_blks[i].prefix_len));
                         if (masked_daddr != masked_ipblk) continue;
                     } else {
-                        masked_daddr = pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[0];
+                        masked_daddr = pkt->ipv6_hdr.ip6_dst.s6_addr32[0];
                         masked_ipblk = ip_blks[i].addr_v6[0];
                         if (masked_daddr != masked_ipblk) continue;
                     }
 
                     if (ip_blks[i].prefix_len > 32) {
                         if (ip_blks[i].prefix_len <= 64) {
-                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[1])
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[1])
                                     & (0xffffffff << (64 - ip_blks[i].prefix_len));
                             masked_ipblk = ntohl(ip_blks[i].addr_v6[1])
                                     & (0xffffffff << (64 - ip_blks[i].prefix_len));
                             if (masked_daddr != masked_ipblk) continue;
                         } else {
-                            masked_daddr = pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[1];
+                            masked_daddr = pkt->ipv6_hdr.ip6_dst.s6_addr32[1];
                             masked_ipblk = ip_blks[i].addr_v6[1];
                             if (masked_daddr != masked_ipblk) continue;
                         }
@@ -315,18 +315,18 @@ static void loop(const int fd) {
 
                     if (ip_blks[i].prefix_len > 64) {
                         if (ip_blks[i].prefix_len <= 96) {
-                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[2])
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[2])
                                     & (0xffffffff << (96 - ip_blks[i].prefix_len));
                             masked_ipblk = ntohl(ip_blks[i].addr_v6[2])
                                     & (0xffffffff << (96 - ip_blks[i].prefix_len));
                             if (masked_daddr != masked_ipblk) continue;
 
                         } else {
-                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[2]);
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[2]);
                             masked_ipblk = ntohl(ip_blks[i].addr_v6[2]);
                             if (masked_daddr != masked_ipblk) continue;
 
-                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.__in6_u.__u6_addr32[3])
+                            masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3])
                                     & (0xffffffff << (128 - ip_blks[i].prefix_len));
                             masked_ipblk = ntohl(ip_blks[i].addr_v6[3])
                                     & (0xffffffff << (128 - ip_blks[i].prefix_len));
@@ -336,8 +336,8 @@ static void loop(const int fd) {
 
                     /* Adding to higher digits is not implemented, but unlikely necessary anyway */
                     memcpy(&pkt->ipv6_padding.ip6_src, ip_blks[i].addr, IPV6_ADDR_LEN);
-                    pkt->ipv6_padding.ip6_src.__in6_u.__u6_addr32[3]
-                            = htonl(ntohl(pkt->ipv6_padding.ip6_src.__in6_u.__u6_addr32[3]) + pkt->ipv6_hdr.ip6_ctlun.ip6_un1.ip6_un1_hlim);
+                    pkt->ipv6_padding.ip6_src.s6_addr32[3]
+                            = htonl(ntohl(pkt->ipv6_padding.ip6_src.s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim);
                     break;
                 }
                 if (0 == memcmp(zero_addr_v6, &pkt->ipv6_padding.ip6_src, IPV6_ADDR_LEN)) {
