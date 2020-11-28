@@ -1,3 +1,6 @@
+#define _GNU_SOURCE 1
+
+#include <sys/socket.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <stdio.h>

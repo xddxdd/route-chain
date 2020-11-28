@@ -3,7 +3,7 @@ ifeq ($(PREFIX),)
 endif
 
 CC := gcc
-CFLAGS += -Wall -O3 -Wl,--build-id=none
+CFLAGS += -std=c99 -Wall -O3 -Wl,--build-id=none
 STRIPFLAGS += -s -R ".comment"
 
 default: route-chain.c

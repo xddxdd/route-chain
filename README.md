@@ -15,7 +15,7 @@ Any number of CIDRs is accepted as parameter.
 Then run `traceroute 192.0.0.10` (or any address in the CIDRs above), and you will get:
 
 ```bash
-traceroute to 192.0.0.30 (192.0.0.30), 30 hops max, 60 byte packets
+traceroute to 192.0.0.10 (192.0.0.10), 30 hops max, 60 byte packets
  1  192.0.0.2  0.105 ms  0.048 ms  0.039 ms
  2  192.0.0.3  0.037 ms  0.036 ms  0.037 ms
  3  192.0.0.4  0.036 ms  0.039 ms  0.039 ms
