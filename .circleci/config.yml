@@ -15,10 +15,8 @@ jobs:
       - checkout
       - run: apt-get update
       - run: apt-get install -y musl musl-dev musl-tools
-      - run:
-          environment:
-            CC: musl-gcc
-          command: make static
+      - run: git clone https://github.com/sabotage-linux/kernel-headers.git
+      - run: make CC=musl-gcc CFLAGS="-Ikernel-headers/x86/include" static
 
 workflows:
   build-glibc:
