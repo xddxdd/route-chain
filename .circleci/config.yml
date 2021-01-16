@@ -1,17 +1,29 @@
 version: 2.1
 
-orbs:
-  python: circleci/python@0.2.1
-
 jobs:
-  build:
+  build-glibc:
     docker:
       - image: gcc
     steps:
       - checkout
       - run: make
 
+  build-musl:
+    docker:
+      - image: gcc
+    steps:
+      - checkout
+      - run: apt-get update
+      - run: apt-get install -y musl musl-dev musl-tools
+      - run:
+          environment:
+            CC: musl-gcc
+          command: make static
+
 workflows:
-  main:
+  build-glibc:
     jobs:
-      - build
+      - build-glibc
+  build-musl:
+    jobs:
+      - build-musl
