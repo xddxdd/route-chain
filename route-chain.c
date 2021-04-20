@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
@@ -60,7 +61,7 @@ static char ifname[IFNAMSIZ];
 static struct ip_blk *ip_blks = NULL;
 uint32_t ip_blks_len = 0;
 
-static int tun_create() {
+static void tun_create(uint32_t cpus, int *fds) {
     struct ifreq ifr;
     int fd, ret;
 
@@ -68,11 +69,18 @@ static int tun_create() {
     if (0 > (fd = open("/dev/net/tun", O_RDWR))) DIE();
 
     memset(&ifr, 0, sizeof(ifr));
-    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
     if (0 > (ret = ioctl(fd, TUNSETIFF, (void*) &ifr))) DIE();
 
+    fds[0] = fd;
+
+    for (uint32_t i = 1; i < cpus; i++) {
+        if (0 > (fd = open("/dev/net/tun", O_RDWR))) DIE();
+        if (0 > (ret = ioctl(fd, TUNSETIFF, (void*) &ifr))) DIE();
+        fds[i] = fd;
+    }
+
     strncpy(ifname, ifr.ifr_name, IFNAMSIZ);
-    return fd;
 }
 
 static void if_up() {
@@ -172,9 +180,9 @@ static void checksum_diff(uint16_t* field, const uint32_t diff) {
     *field = (0x0000 == cksum) ? 0xffff : cksum;
 }
 
-static void loop(const int fd) {
+static void* loop(void *arg) {
     struct pollfd fds[] = {
-        {.fd = fd, .events = POLLIN}
+        {.fd = *(int*) arg, .events = POLLIN}
     };
 
     uint8_t pkt_buf[PKT_MAX_LEN];
@@ -182,7 +190,7 @@ static void loop(const int fd) {
     uint32_t pkt_len;
 
     while (0 <= poll(fds, 1, -1)) {
-        pkt_len = read(fd, &pkt->ipv4_hdr,
+        pkt_len = read(fds[0].fd, &pkt->ipv4_hdr,
                        PKT_MAX_LEN - (((uint8_t*) &pkt->ipv4_hdr) - ((uint8_t*) &pkt)));
         if (pkt_len <= 0) DIE();
 
@@ -203,7 +211,7 @@ static void loop(const int fd) {
                 checksum_diff(&pkt->icmp_hdr.checksum, ICMP_ECHOREPLY - ICMP_ECHO);
 
                 /* send pkt */
-                if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
+                if (pkt_len != write(fds[0].fd, &pkt->ipv4_hdr, pkt_len)) DIE();
             } else {
                 /* populate icmp time exceed header */
                 memset(&pkt->ipv4_padding, 0, 28);
@@ -249,7 +257,7 @@ static void loop(const int fd) {
 
                 /* send pkt */
                 pkt_len = 56;
-                if (pkt_len != write(fd, &pkt->ipv4_padding, pkt_len)) DIE();
+                if (pkt_len != write(fds[0].fd, &pkt->ipv4_padding, pkt_len)) DIE();
             }
         } else if(((pkt->ipv6_hdr.ip6_flow & 0xf0) >> 4) == 6) {
             /* Only packets without IP options is supported */
@@ -269,7 +277,7 @@ static void loop(const int fd) {
                 checksum_diff(&pkt->icmp6_hdr.checksum, ICMP6_ECHO_REPLY - ICMP6_ECHO_REQUEST);
 
                 /* send pkt */
-                if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
+                if (pkt_len != write(fds[0].fd, &pkt->ipv4_hdr, pkt_len)) DIE();
             } else {
                 const static uint32_t zero_addr_v6[IPV6_INT32_SEGS] = {0, 0, 0, 0};
 
@@ -363,14 +371,24 @@ static void loop(const int fd) {
 
                 /* send pkt */
                 pkt_len = 96;
-                if (pkt_len != write(fd, &pkt->ipv6_padding, pkt_len)) DIE();
+                if (pkt_len != write(fds[0].fd, &pkt->ipv6_padding, pkt_len)) DIE();
             }
         }
     }
+
+    return NULL;
 }
 
 int main(int argc, char* argv[]) {
-    int fd = tun_create();
+    int cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if (cpus <= 0) {
+        cpus = 1;
+    }
+
+    int fds[cpus];
+    pthread_t threads[cpus];
+
+    tun_create(cpus, fds);
     if_up();
 
     /* List of configured prefix blocks */
@@ -398,11 +416,19 @@ int main(int argc, char* argv[]) {
 
     printf("Interface: %s\n", ifname);
     printf("Index: %d\n", if_get_index());
+    printf("Threads: %d\n", cpus);
 
-    if (0 > fd) {
-        return fd;
+    for (uint32_t i = 0; i < cpus; i++) {
+        if (0 != pthread_create(&threads[i], NULL, loop, &fds[i])) DIE();
+
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(i, &cpuset);
+        if (0 != pthread_setaffinity_np(threads[i], sizeof(cpuset), &cpuset)) DIE();
     }
-    loop(fd);
+    for (uint32_t i = 0; i < cpus; i++) {
+        pthread_join(threads[i], NULL);
+    }
 
     /* Don't need to free anything, since OS will clean up after we exit */
     return 0;
