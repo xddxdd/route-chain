@@ -40,6 +40,8 @@ This app is made with speed and efficiency in mind. Specifically:
    - No need to move data around
 3. Incremental checksum updates where possible
    - Used for responding to Pings, only minimal updates needed
+4. And it's multithreaded!
+   - CPU count automatically detected, multiqueue TUN/TAP used
 
 ## License
 
