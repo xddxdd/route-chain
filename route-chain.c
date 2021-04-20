@@ -263,6 +263,21 @@ static bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* addr) {
     return false;
 }
 
+static bool is_ipv4_ttl_exceeded(struct pkt* pkt, uint32_t base_addr, uint32_t* timeout_addr) {
+    *timeout_addr = htonl(ntohl(base_addr) + pkt->ipv4_hdr.ttl);
+
+    return !(ntohl(base_addr) <= ntohl(pkt->ipv4_hdr.daddr)
+             && ntohl(base_addr) + pkt->ipv4_hdr.ttl >= ntohl(pkt->ipv4_hdr.daddr));
+}
+
+static bool is_ipv6_ttl_exceeded(struct pkt* pkt, struct in6_addr* base_addr, struct in6_addr* timeout_addr) {
+    memcpy(timeout_addr, base_addr, IPV6_ADDR_LEN);
+    timeout_addr->s6_addr32[3] = htonl(ntohl(timeout_addr->s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim);
+
+    return !(ntohl(base_addr->s6_addr32[3]) <= ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3])
+             && ntohl(base_addr->s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim >= ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3]));
+}
+
 static void reply_icmp_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* swap src/dst address */
     uint32_t tmp        = pkt->ipv4_hdr.daddr;
@@ -304,7 +319,8 @@ static void reply_tcp_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
 
     /* set tcp seq & ack */
     pkt->tcp_hdr.th_ack = htonl(ntohl(pkt->tcp_hdr.th_seq) + 1);
-    checksum_diff(&pkt->tcp_hdr.th_sum, pkt->tcp_hdr.th_ack - pkt->tcp_hdr.th_seq);
+    checksum_diff(&pkt->tcp_hdr.th_sum, (pkt->tcp_hdr.th_ack >> 16) - (pkt->tcp_hdr.th_seq >> 16));
+    checksum_diff(&pkt->tcp_hdr.th_sum, (pkt->tcp_hdr.th_ack & 0xffff) - (pkt->tcp_hdr.th_seq & 0xffff));
     pkt->tcp_hdr.th_seq = 0;
 
     /* set flags RST+ACK */
@@ -327,13 +343,7 @@ static void reply_tcp_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
 }
 
-static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) {
-    uint32_t base_addr = find_matching_ipv4_block(pkt);
-    if (base_addr == 0) {
-        /* No matching address found */
-        return;
-    }
-
+static void reply_icmp_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* populate icmp time exceed header */
     memset(&pkt->ipv4_padding, 0, 28);
     pkt->ipv4_padding.version  = 4;
@@ -343,20 +353,36 @@ static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) {
     pkt->ipv4_padding.protocol = IPPROTO_ICMP;
 
     /* copy over source addr as dest addr*/
+    pkt->ipv4_padding.saddr = pkt->ipv4_hdr.daddr;
     pkt->ipv4_padding.daddr = pkt->ipv4_hdr.saddr;
+    pkt->icmp_padding.type  = ICMP_DEST_UNREACH;
+    pkt->icmp_padding.code  = ICMP_PORT_UNREACH;
 
-    /* check if reached target, to end the traceroute */
-    if (ntohl(base_addr) <= ntohl(pkt->ipv4_hdr.daddr)
-        && ntohl(base_addr) + pkt->ipv4_hdr.ttl >= ntohl(pkt->ipv4_hdr.daddr))
-    {
-        pkt->ipv4_padding.saddr = pkt->ipv4_hdr.daddr;
-        pkt->icmp_padding.type  = ICMP_DEST_UNREACH;
-        pkt->icmp_padding.code  = ICMP_PORT_UNREACH;
-    } else {
-        pkt->ipv4_padding.saddr = htonl(ntohl(base_addr) + pkt->ipv4_hdr.ttl);
-        pkt->icmp_padding.type  = ICMP_TIME_EXCEEDED;
-        pkt->icmp_padding.code  = 0;
-    }
+    /* update checksum */
+    pkt->ipv4_padding.check    = 0;
+    pkt->ipv4_padding.check    = checksum_calc(&pkt->ipv4_padding, 20);
+    pkt->icmp_padding.checksum = 0;
+    pkt->icmp_padding.checksum = checksum_calc(&pkt->icmp_padding, 36);
+
+    /* send pkt */
+    pkt_len = 56;
+    if (pkt_len != write(fd, &pkt->ipv4_padding, pkt_len)) DIE();
+}
+
+static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, uint32_t timeout_addr) {
+    /* populate icmp time exceed header */
+    memset(&pkt->ipv4_padding, 0, 28);
+    pkt->ipv4_padding.version  = 4;
+    pkt->ipv4_padding.ihl      = 5;
+    pkt->ipv4_padding.tot_len  = htons(56);
+    pkt->ipv4_padding.ttl      = REPLY_TTL;
+    pkt->ipv4_padding.protocol = IPPROTO_ICMP;
+
+    /* copy over source addr as dest addr*/
+    pkt->ipv4_padding.saddr = timeout_addr;
+    pkt->ipv4_padding.daddr = pkt->ipv4_hdr.saddr;
+    pkt->icmp_padding.type  = ICMP_TIME_EXCEEDED;
+    pkt->icmp_padding.code  = 0;
 
     /* update checksum */
     pkt->ipv4_padding.check    = 0;
@@ -410,7 +436,8 @@ static void reply_tcp6_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
 
     /* set tcp seq & ack */
     pkt->tcp6_hdr.th_ack = htonl(ntohl(pkt->tcp6_hdr.th_seq) + 1);
-    checksum_diff(&pkt->tcp6_hdr.th_sum, pkt->tcp6_hdr.th_ack - pkt->tcp6_hdr.th_seq);
+    checksum_diff(&pkt->tcp6_hdr.th_sum, (pkt->tcp6_hdr.th_ack >> 16) - (pkt->tcp6_hdr.th_seq >> 16));
+    checksum_diff(&pkt->tcp6_hdr.th_sum, (pkt->tcp6_hdr.th_ack & 0xffff) - (pkt->tcp6_hdr.th_seq & 0xffff));
     pkt->tcp6_hdr.th_seq = 0;
 
     /* set flags RST+ACK */
@@ -433,13 +460,7 @@ static void reply_tcp6_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv6_hdr, pkt_len)) DIE();
 }
 
-static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) {
-    struct in6_addr base_addr;
-    if (!find_matching_ipv6_block(pkt, &base_addr)) {
-        /* No matching address found */
-        return;
-    }
-
+static void reply_icmp6_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* populate icmp time exceed header */
     memset(&pkt->ipv6_padding, 0, 48);
     pkt->ipv6_padding.ip6_flow = 0x60;
@@ -448,22 +469,33 @@ static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) 
     pkt->ipv6_padding.ip6_hlim = REPLY_TTL;
 
     /* copy over source addr as dest addr*/
+    memcpy(&pkt->ipv6_padding.ip6_src, &pkt->ipv6_hdr.ip6_dst, IPV6_ADDR_LEN);
     memcpy(&pkt->ipv6_padding.ip6_dst, &pkt->ipv6_hdr.ip6_src, IPV6_ADDR_LEN);
+    pkt->icmp_padding.type = ICMP6_DST_UNREACH;
+    pkt->icmp_padding.code = ICMP6_DST_UNREACH_NOPORT;
 
-    /* check if reached target, to end the traceroute */
-    if (ntohl(base_addr.s6_addr32[3]) <= ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3])
-        && ntohl(base_addr.s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim >= ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3]))
-    {
-        memcpy(&pkt->ipv6_padding.ip6_src, &pkt->ipv6_hdr.ip6_dst, IPV6_ADDR_LEN);
-        pkt->icmp_padding.type = ICMP6_DST_UNREACH;
-        pkt->icmp_padding.code = ICMP6_DST_UNREACH_NOPORT;
-    } else {
-        memcpy(&pkt->ipv6_padding.ip6_src, &base_addr, IPV6_ADDR_LEN);
-        pkt->ipv6_padding.ip6_src.s6_addr32[3]
-            = htonl(ntohl(pkt->ipv6_padding.ip6_src.s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim);
-        pkt->icmp_padding.type = ICMP6_TIME_EXCEEDED;
-        pkt->icmp_padding.code = 0;
-    }
+    /* update checksum */
+    pkt->icmp_padding.checksum = 0;
+    pkt->icmp_padding.checksum = checksum_calc_ipv6_phdr(&pkt->ipv6_padding, &pkt->icmp_padding, 56);
+
+    /* send pkt */
+    pkt_len = 96;
+    if (pkt_len != write(fd, &pkt->ipv6_padding, pkt_len)) DIE();
+}
+
+static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, struct in6_addr* timeout_addr) {
+    /* populate icmp time exceed header */
+    memset(&pkt->ipv6_padding, 0, 48);
+    pkt->ipv6_padding.ip6_flow = 0x60;
+    pkt->ipv6_padding.ip6_plen = htons(56);
+    pkt->ipv6_padding.ip6_nxt  = IPPROTO_ICMPV6;
+    pkt->ipv6_padding.ip6_hlim = REPLY_TTL;
+
+    /* copy over source addr as dest addr*/
+    memcpy(&pkt->ipv6_padding.ip6_src, timeout_addr, IPV6_ADDR_LEN);
+    memcpy(&pkt->ipv6_padding.ip6_dst, &pkt->ipv6_hdr.ip6_src, IPV6_ADDR_LEN);
+    pkt->icmp_padding.type = ICMP6_TIME_EXCEEDED;
+    pkt->icmp_padding.code = 0;
 
     /* update checksum */
     pkt->icmp_padding.checksum = 0;
@@ -476,22 +508,37 @@ static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) 
 
 static void handle_pkt(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt->ipv4_hdr.version == 4 && pkt->ipv4_hdr.ihl == 5) {
-        /* Only packets without IP options is supported */
-        if ((pkt->ipv4_hdr.protocol == IPPROTO_ICMP) && (pkt->icmp_hdr.type == ICMP_ECHO)) {
+        uint32_t base_addr = find_matching_ipv4_block(pkt);
+        uint32_t timeout_addr;
+        if (base_addr == 0) {
+            /* No matching address found */
+            return;
+        }
+
+        if (is_ipv4_ttl_exceeded(pkt, base_addr, &timeout_addr)) {
+            reply_icmp_ttl_exceeded(pkt, pkt_len, fd, timeout_addr);
+        } else if ((pkt->ipv4_hdr.protocol == IPPROTO_ICMP) && (pkt->icmp_hdr.type == ICMP_ECHO)) {
             reply_icmp_ping(pkt, pkt_len, fd);
         } else if (pkt->ipv4_hdr.protocol == IPPROTO_TCP) {
             reply_tcp_syn(pkt, pkt_len, fd);
         } else {
-            reply_icmp_ttl_exceeded(pkt, pkt_len, fd);
+            reply_icmp_unreachable(pkt, pkt_len, fd);
         }
     } else if (((pkt->ipv6_hdr.ip6_flow & 0xf0) >> 4) == 6) {
-        /* Only packets without IP options is supported */
-        if ((pkt->ipv6_hdr.ip6_nxt == IPPROTO_ICMPV6) && (pkt->icmp6_hdr.type == ICMP6_ECHO_REQUEST)) {
+        struct in6_addr base_addr, timeout_addr;
+        if (!find_matching_ipv6_block(pkt, &base_addr)) {
+            /* No matching address found */
+            return;
+        }
+
+        if (is_ipv6_ttl_exceeded(pkt, &base_addr, &timeout_addr)) {
+            reply_icmp6_ttl_exceeded(pkt, pkt_len, fd, &timeout_addr);
+        } else if ((pkt->ipv6_hdr.ip6_nxt == IPPROTO_ICMPV6) && (pkt->icmp6_hdr.type == ICMP6_ECHO_REQUEST)) {
             reply_icmp6_ping(pkt, pkt_len, fd);
         } else if (pkt->ipv6_hdr.ip6_nxt == IPPROTO_TCP) {
             reply_tcp6_syn(pkt, pkt_len, fd);
         } else {
-            reply_icmp6_ttl_exceeded(pkt, pkt_len, fd);
+            reply_icmp6_unreachable(pkt, pkt_len, fd);
         }
     }
 }
