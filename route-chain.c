@@ -9,6 +9,7 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -29,6 +30,7 @@
 #define IPV6_ADDR_LEN   16
 #define IPV6_INT32_SEGS (IPV6_ADDR_LEN / sizeof(uint32_t))
 #define REPLY_TTL       233
+#define TCPOPT_NOP_16B  (htons((TCPOPT_NOP << 8) + TCPOPT_NOP))
 
 struct ip_blk {
     uint32_t af;
@@ -52,12 +54,18 @@ struct pkt {
     struct icmphdr icmp_padding;
     union {
         struct {
-            struct iphdr   ipv4_hdr;
-            struct icmphdr icmp_hdr;
+            struct iphdr ipv4_hdr;
+            union {
+                struct tcphdr  tcp_hdr;
+                struct icmphdr icmp_hdr;
+            };
         };
         struct {
             struct ip6_hdr ipv6_hdr;
-            struct icmphdr icmp6_hdr;
+            union {
+                struct tcphdr  tcp6_hdr;
+                struct icmphdr icmp6_hdr;
+            };
         };
     };
 };
@@ -274,7 +282,58 @@ static void reply_icmp_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
 }
 
-static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, uint32_t base_addr) {
+static void reply_tcp_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
+    if (pkt->tcp_hdr.th_flags != TH_SYN) {
+        /* only handle TCP SYN pkts */
+        return;
+    }
+
+    /* swap src/dst address */
+    uint32_t tmp        = pkt->ipv4_hdr.daddr;
+    pkt->ipv4_hdr.daddr = pkt->ipv4_hdr.saddr;
+    pkt->ipv4_hdr.saddr = tmp;
+
+    /* set pkt ttl */
+    checksum_diff(&pkt->ipv4_hdr.check, REPLY_TTL - pkt->ipv4_hdr.ttl);
+    pkt->ipv4_hdr.ttl = REPLY_TTL;
+
+    /* swap src/dst port */
+    tmp                   = pkt->tcp_hdr.th_dport;
+    pkt->tcp_hdr.th_dport = pkt->tcp_hdr.th_sport;
+    pkt->tcp_hdr.th_sport = tmp;
+
+    /* set tcp seq & ack */
+    pkt->tcp_hdr.th_ack = htonl(ntohl(pkt->tcp_hdr.th_seq) + 1);
+    checksum_diff(&pkt->tcp_hdr.th_sum, pkt->tcp_hdr.th_ack - pkt->tcp_hdr.th_seq);
+    pkt->tcp_hdr.th_seq = 0;
+
+    /* set flags RST+ACK */
+    pkt->tcp_hdr.th_flags = TH_RST | TH_ACK;
+    checksum_diff(&pkt->tcp_hdr.th_sum, htons((TH_RST | TH_ACK) - TH_SYN));
+
+    /* clear window */
+    checksum_diff(&pkt->tcp_hdr.th_sum, 0 - pkt->tcp_hdr.th_win);
+    pkt->tcp_hdr.th_win = 0;
+
+    /* clear TCP options */
+    uint32_t len = pkt->tcp_hdr.th_off * 4;
+    for (uint32_t i = sizeof(struct tcphdr) / sizeof(uint16_t); i < len / sizeof(uint16_t); i++) {
+        uint16_t* ptr = (uint16_t*) &pkt->tcp_hdr + i;
+        checksum_diff(&pkt->tcp_hdr.th_sum, TCPOPT_NOP_16B - *ptr);
+        *ptr = TCPOPT_NOP_16B;
+    }
+
+    /* send pkt */
+    if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
+}
+
+static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) {
+    uint32_t base_addr = find_matching_ipv4_block(pkt);
+    if (base_addr == 0) {
+        /* No matching address found */
+        return;
+    }
+
     /* populate icmp time exceed header */
     memset(&pkt->ipv4_padding, 0, 28);
     pkt->ipv4_padding.version  = 4;
@@ -329,6 +388,51 @@ static void reply_icmp6_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv6_hdr, pkt_len)) DIE();
 }
 
+static void reply_tcp6_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
+    if (pkt->tcp6_hdr.th_flags != TH_SYN) {
+        /* only handle TCP SYN pkts */
+        return;
+    }
+
+    /* swap src/dst address */
+    char tmp[IPV6_ADDR_LEN];
+    memcpy(tmp, &pkt->ipv6_hdr.ip6_dst, IPV6_ADDR_LEN);
+    memcpy(&pkt->ipv6_hdr.ip6_dst, &pkt->ipv6_hdr.ip6_src, IPV6_ADDR_LEN);
+    memcpy(&pkt->ipv6_hdr.ip6_src, tmp, IPV6_ADDR_LEN);
+
+    /* set pkt ttl */
+    pkt->ipv6_hdr.ip6_hlim = REPLY_TTL;
+
+    /* swap src/dst port */
+    uint32_t tmp2          = pkt->tcp6_hdr.th_dport;
+    pkt->tcp6_hdr.th_dport = pkt->tcp6_hdr.th_sport;
+    pkt->tcp6_hdr.th_sport = tmp2;
+
+    /* set tcp seq & ack */
+    pkt->tcp6_hdr.th_ack = htonl(ntohl(pkt->tcp6_hdr.th_seq) + 1);
+    checksum_diff(&pkt->tcp6_hdr.th_sum, pkt->tcp6_hdr.th_ack - pkt->tcp6_hdr.th_seq);
+    pkt->tcp6_hdr.th_seq = 0;
+
+    /* set flags RST+ACK */
+    pkt->tcp6_hdr.th_flags = TH_RST | TH_ACK;
+    checksum_diff(&pkt->tcp6_hdr.th_sum, htons((TH_RST | TH_ACK) - TH_SYN));
+
+    /* clear window */
+    checksum_diff(&pkt->tcp6_hdr.th_sum, 0 - pkt->tcp6_hdr.th_win);
+    pkt->tcp6_hdr.th_win = 0;
+
+    /* clear TCP options */
+    uint32_t len = pkt->tcp6_hdr.th_off * 4;
+    for (uint32_t i = sizeof(struct tcphdr) / sizeof(uint16_t); i < len / sizeof(uint16_t); i++) {
+        uint16_t* ptr = (uint16_t*) &pkt->tcp6_hdr + i;
+        checksum_diff(&pkt->tcp6_hdr.th_sum, TCPOPT_NOP_16B - *ptr);
+        *ptr = TCPOPT_NOP_16B;
+    }
+
+    /* send pkt */
+    if (pkt_len != write(fd, &pkt->ipv6_hdr, pkt_len)) DIE();
+}
+
 static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd) {
     struct in6_addr base_addr;
     if (!find_matching_ipv6_block(pkt, &base_addr)) {
@@ -376,22 +480,16 @@ static void handle_pkt(struct pkt* pkt, uint32_t pkt_len, int fd) {
         if ((pkt->ipv4_hdr.protocol == IPPROTO_ICMP) && (pkt->icmp_hdr.type == ICMP_ECHO)) {
             reply_icmp_ping(pkt, pkt_len, fd);
         } else if (pkt->ipv4_hdr.protocol == IPPROTO_TCP) {
-            // TODO: TCP logic
+            reply_tcp_syn(pkt, pkt_len, fd);
         } else {
-            uint32_t saddr = find_matching_ipv4_block(pkt);
-            if (0 == saddr) {
-                /* No matching address found */
-                return;
-            }
-
-            reply_icmp_ttl_exceeded(pkt, pkt_len, fd, saddr);
+            reply_icmp_ttl_exceeded(pkt, pkt_len, fd);
         }
     } else if (((pkt->ipv6_hdr.ip6_flow & 0xf0) >> 4) == 6) {
         /* Only packets without IP options is supported */
         if ((pkt->ipv6_hdr.ip6_nxt == IPPROTO_ICMPV6) && (pkt->icmp6_hdr.type == ICMP6_ECHO_REQUEST)) {
             reply_icmp6_ping(pkt, pkt_len, fd);
         } else if (pkt->ipv6_hdr.ip6_nxt == IPPROTO_TCP) {
-            // TODO: TCP logic
+            reply_tcp6_syn(pkt, pkt_len, fd);
         } else {
             reply_icmp6_ttl_exceeded(pkt, pkt_len, fd);
         }
