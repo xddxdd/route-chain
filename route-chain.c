@@ -74,7 +74,7 @@ static char           ifname[IFNAMSIZ];
 static struct ip_blk* ip_blks     = NULL;
 uint32_t              ip_blks_len = 0;
 
-static void tun_create(uint32_t cpus, int* fds) {
+static inline void tun_create(uint32_t cpus, int* fds) {
     struct ifreq ifr;
     int          fd, ret;
 
@@ -96,7 +96,7 @@ static void tun_create(uint32_t cpus, int* fds) {
     strncpy(ifname, ifr.ifr_name, IFNAMSIZ);
 }
 
-static void if_up() {
+static inline void if_up() {
     struct ifreq ifr;
     int          fd;
 
@@ -110,7 +110,7 @@ static void if_up() {
     close(fd);
 }
 
-static int if_get_index() {
+static inline int if_get_index() {
     int  fd;
     char buf[BUF_SIZE];
     int  len;
@@ -122,7 +122,7 @@ static int if_get_index() {
     return atoi(buf);
 }
 
-static void if_addr(const uint8_t af, const char* addr, const uint32_t prefix_len) {
+static inline void if_addr(const uint8_t af, const char* addr, const uint32_t prefix_len) {
     struct {
         struct nlmsghdr  nh;
         struct ifaddrmsg msg;
@@ -154,14 +154,14 @@ static void if_addr(const uint8_t af, const char* addr, const uint32_t prefix_le
     close(fd);
 }
 
-static uint16_t checksum_reduce(uint32_t cksum) {
+static inline uint16_t checksum_reduce(uint32_t cksum) {
     cksum = (cksum >> 16) + (cksum & 0xffff);
     cksum = (cksum >> 16) + (cksum & 0xffff);
     cksum = 0xffff - cksum;
     return (0x0000 == cksum) ? 0xffff : cksum;
 }
 
-static uint16_t checksum_calc(const void* buf, const uint32_t size) {
+static inline uint16_t checksum_calc(const void* buf, const uint32_t size) {
     uint32_t        cksum = 0;
     const uint16_t* b     = buf;
 
@@ -171,7 +171,7 @@ static uint16_t checksum_calc(const void* buf, const uint32_t size) {
     return checksum_reduce(cksum);
 }
 
-static uint16_t checksum_calc_ipv6_phdr(const struct ip6_hdr* ip6, const void* buf, const uint32_t size) {
+static inline uint16_t checksum_calc_ipv6_phdr(const struct ip6_hdr* ip6, const void* buf, const uint32_t size) {
     uint32_t        cksum = 0;
     const uint16_t* b     = buf;
 
@@ -188,14 +188,14 @@ static uint16_t checksum_calc_ipv6_phdr(const struct ip6_hdr* ip6, const void* b
     return checksum_reduce(cksum);
 }
 
-static void checksum_diff(uint16_t* field, const uint32_t diff) {
+static inline void checksum_diff(uint16_t* field, const uint32_t diff) {
     uint32_t cksum = ((uint32_t) *field) - diff;
     cksum          = (cksum >> 16) + (cksum & 0xffff);
     *field         = (0x0000 == cksum) ? 0xffff : cksum;
 }
 
 /* find configured ip block to create response */
-static uint32_t find_matching_ipv4_block(struct pkt* pkt) {
+static inline uint32_t find_matching_ipv4_block(struct pkt* pkt) {
     for (uint32_t i = 0; i < ip_blks_len; i++) {
         if (ip_blks[i].af != AF_INET) continue;
 
@@ -208,7 +208,7 @@ static uint32_t find_matching_ipv4_block(struct pkt* pkt) {
     return 0;
 }
 
-static bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* addr) {
+static inline bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* addr) {
     /* find configured ip block, create response */
     for (uint32_t i = 0; i < ip_blks_len; i++) {
         if (ip_blks[i].af != AF_INET6) continue;
@@ -263,14 +263,14 @@ static bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* addr) {
     return false;
 }
 
-static bool is_ipv4_ttl_exceeded(struct pkt* pkt, uint32_t base_addr, uint32_t* timeout_addr) {
+static inline bool is_ipv4_ttl_exceeded(struct pkt* pkt, uint32_t base_addr, uint32_t* timeout_addr) {
     *timeout_addr = htonl(ntohl(base_addr) + pkt->ipv4_hdr.ttl);
 
     return !(ntohl(base_addr) <= ntohl(pkt->ipv4_hdr.daddr)
              && ntohl(base_addr) + pkt->ipv4_hdr.ttl >= ntohl(pkt->ipv4_hdr.daddr));
 }
 
-static bool is_ipv6_ttl_exceeded(struct pkt* pkt, struct in6_addr* base_addr, struct in6_addr* timeout_addr) {
+static inline bool is_ipv6_ttl_exceeded(struct pkt* pkt, struct in6_addr* base_addr, struct in6_addr* timeout_addr) {
     memcpy(timeout_addr, base_addr, IPV6_ADDR_LEN);
     timeout_addr->s6_addr32[3] = htonl(ntohl(timeout_addr->s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim);
 
@@ -278,7 +278,7 @@ static bool is_ipv6_ttl_exceeded(struct pkt* pkt, struct in6_addr* base_addr, st
              && ntohl(base_addr->s6_addr32[3]) + pkt->ipv6_hdr.ip6_hlim >= ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3]));
 }
 
-static void reply_icmp_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void reply_icmp_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* swap src/dst address */
     uint32_t tmp        = pkt->ipv4_hdr.daddr;
     pkt->ipv4_hdr.daddr = pkt->ipv4_hdr.saddr;
@@ -297,7 +297,7 @@ static void reply_icmp_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
 }
 
-static void reply_tcp_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void reply_tcp_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt->tcp_hdr.th_flags != TH_SYN) {
         /* only handle TCP SYN pkts */
         return;
@@ -343,7 +343,7 @@ static void reply_tcp_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv4_hdr, pkt_len)) DIE();
 }
 
-static void reply_icmp_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void reply_icmp_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* populate icmp time exceed header */
     memset(&pkt->ipv4_padding, 0, 28);
     pkt->ipv4_padding.version  = 4;
@@ -369,7 +369,7 @@ static void reply_icmp_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv4_padding, pkt_len)) DIE();
 }
 
-static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, uint32_t timeout_addr) {
+static inline void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, uint32_t timeout_addr) {
     /* populate icmp time exceed header */
     memset(&pkt->ipv4_padding, 0, 28);
     pkt->ipv4_padding.version  = 4;
@@ -395,7 +395,7 @@ static void reply_icmp_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, u
     if (pkt_len != write(fd, &pkt->ipv4_padding, pkt_len)) DIE();
 }
 
-static void reply_icmp6_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void reply_icmp6_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* swap src/dst address */
     char tmp[IPV6_ADDR_LEN];
     memcpy(tmp, &pkt->ipv6_hdr.ip6_dst, IPV6_ADDR_LEN);
@@ -414,7 +414,7 @@ static void reply_icmp6_ping(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv6_hdr, pkt_len)) DIE();
 }
 
-static void reply_tcp6_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void reply_tcp6_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt->tcp6_hdr.th_flags != TH_SYN) {
         /* only handle TCP SYN pkts */
         return;
@@ -460,7 +460,7 @@ static void reply_tcp6_syn(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv6_hdr, pkt_len)) DIE();
 }
 
-static void reply_icmp6_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void reply_icmp6_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
     /* populate icmp time exceed header */
     memset(&pkt->ipv6_padding, 0, 48);
     pkt->ipv6_padding.ip6_flow = 0x60;
@@ -483,7 +483,7 @@ static void reply_icmp6_unreachable(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt_len != write(fd, &pkt->ipv6_padding, pkt_len)) DIE();
 }
 
-static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, struct in6_addr* timeout_addr) {
+static inline void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, struct in6_addr* timeout_addr) {
     /* populate icmp time exceed header */
     memset(&pkt->ipv6_padding, 0, 48);
     pkt->ipv6_padding.ip6_flow = 0x60;
@@ -506,7 +506,7 @@ static void reply_icmp6_ttl_exceeded(struct pkt* pkt, uint32_t pkt_len, int fd, 
     if (pkt_len != write(fd, &pkt->ipv6_padding, pkt_len)) DIE();
 }
 
-static void handle_pkt(struct pkt* pkt, uint32_t pkt_len, int fd) {
+static inline void handle_pkt(struct pkt* pkt, uint32_t pkt_len, int fd) {
     if (pkt->ipv4_hdr.version == 4 && pkt->ipv4_hdr.ihl == 5) {
         uint32_t base_addr = find_matching_ipv4_block(pkt);
         uint32_t timeout_addr;
@@ -543,7 +543,7 @@ static void handle_pkt(struct pkt* pkt, uint32_t pkt_len, int fd) {
     }
 }
 
-static void* loop(void* arg) {
+static __attribute__((noreturn)) void* loop(void* arg) {
     struct pollfd fds[] = { { .fd = *(int*) arg, .events = POLLIN } };
 
     uint8_t     pkt_buf[PKT_MAX_LEN];
@@ -557,7 +557,7 @@ static void* loop(void* arg) {
         handle_pkt(pkt, pkt_len, fds[0].fd);
     }
 
-    return NULL;
+    DIE();
 }
 
 int main(int argc, char* argv[]) {
@@ -567,7 +567,7 @@ int main(int argc, char* argv[]) {
     }
 
     int       fds[cpus];
-    pthread_t threads[cpus];
+    pthread_t thread;
 
     tun_create(cpus, fds);
     if_up();
@@ -595,17 +595,25 @@ int main(int argc, char* argv[]) {
     printf("Index: %d\n", if_get_index());
     printf("Threads: %d\n", cpus);
 
-    for (uint32_t i = 0; i < cpus; i++) {
-        if (0 != pthread_create(&threads[i], NULL, loop, &fds[i])) DIE();
+    for (uint32_t i = 1; i < cpus; i++) {
+        if (0 != pthread_create(&thread, NULL, loop, &fds[i])) DIE();
 
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
         CPU_SET(i, &cpuset);
-        if (0 != pthread_setaffinity_np(threads[i], sizeof(cpuset), &cpuset)) DIE();
+        if (0 != pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset)) DIE();
     }
-    for (uint32_t i = 0; i < cpus; i++) {
-        pthread_join(threads[i], NULL);
-    }
+
+    do {
+        thread = pthread_self();
+
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(0, &cpuset);
+        if (0 != pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset)) DIE();
+    } while (0);
+
+    loop(&fds[0]);
 
     /* Don't need to free anything, since OS will clean up after we exit */
     return 0;
