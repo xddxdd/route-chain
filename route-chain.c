@@ -588,6 +588,10 @@ int main(int argc, char* argv[]) {
 
         if (0 == inet_pton(ip_blks[i - 1].af, argv[i], ip_blks[i - 1].addr)) DIE();
 
+        if (NULL != slash) {
+            slash[0] = '/';
+        }
+
         if_addr(ip_blks[i - 1].af, ip_blks[i - 1].addr, ip_blks[i - 1].prefix_len);
     }
 
