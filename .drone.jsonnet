@@ -78,26 +78,24 @@ local AlpineCompileJob(image) = {
     "kind": "secret",
     "name": "tg_token",
     "get": {
-      "path": "kv/data/telegram",
-      "name": "token"
+      "path": "telegram-token",
+      "name": "telegram-token"
     }
   },
   {
     "kind": "secret",
     "name": "tg_target",
     "get": {
-      "path": "kv/data/telegram",
-      "name": "target"
+      "path": "telegram-target",
+      "name": "telegram-target"
     }
   },
-  DebianCompileJob('debian:jessie', 'linux-headers-amd64'),
-  DebianCompileJob('debian:stretch', 'linux-headers-amd64'),
   DebianCompileJob('debian:buster', 'linux-headers-amd64'),
   DebianCompileJob('debian:bullseye', 'linux-headers-amd64'),
+  DebianCompileJob('debian:bookworm', 'linux-headers-amd64'),
   DebianCompileJob('debian:unstable', 'linux-headers-amd64'),
-  DebianCompileJob('ubuntu:xenial', 'linux-headers-generic'),
-  DebianCompileJob('ubuntu:bionic', 'linux-headers-generic'),
   DebianCompileJob('ubuntu:focal', 'linux-headers-generic'),
+  DebianCompileJob('ubuntu:jammy', 'linux-headers-generic'),
   AlpineCompileJob('alpine:edge'),
   AlpineCompileJob('alpine:latest'),
 ]
