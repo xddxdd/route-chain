@@ -90,10 +90,10 @@ local AlpineCompileJob(image) = {
       "name": "telegram-target"
     }
   },
-  DebianCompileJob('debian:buster', 'linux-headers-amd64'),
-  DebianCompileJob('debian:bullseye', 'linux-headers-amd64'),
-  DebianCompileJob('debian:bookworm', 'linux-headers-amd64'),
-  DebianCompileJob('debian:unstable', 'linux-headers-amd64'),
+  DebianCompileJob('debian:buster', 'linux-headers-arm64'),
+  DebianCompileJob('debian:bullseye', 'linux-headers-arm64'),
+  DebianCompileJob('debian:bookworm', 'linux-headers-arm64'),
+  DebianCompileJob('debian:unstable', 'linux-headers-arm64'),
   DebianCompileJob('ubuntu:focal', 'linux-headers-generic'),
   DebianCompileJob('ubuntu:jammy', 'linux-headers-generic'),
   AlpineCompileJob('alpine:edge'),
