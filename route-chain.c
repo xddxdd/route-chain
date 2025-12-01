@@ -165,9 +165,7 @@ static inline uint16_t checksum_calc(const void* buf, const uint32_t size) {
     uint32_t        cksum = 0;
     const uint16_t* b     = buf;
 
-    for (uint32_t i = 0; i < size / 2; i++) {
-        cksum += b[i];
-    }
+    for (uint32_t i = 0; i < size / 2; i++) { cksum += b[i]; }
     return checksum_reduce(cksum);
 }
 
@@ -182,9 +180,7 @@ static inline uint16_t checksum_calc_ipv6_phdr(const struct ip6_hdr* ip6, const 
     cksum += ip6->ip6_plen;
     cksum += ip6->ip6_nxt << 8;
 
-    for (uint32_t i = 0; i < size / 2; i++) {
-        cksum += b[i];
-    }
+    for (uint32_t i = 0; i < size / 2; i++) { cksum += b[i]; }
     return checksum_reduce(cksum);
 }
 
@@ -202,6 +198,7 @@ static inline uint32_t find_matching_ipv4_block(struct pkt* pkt) {
         uint32_t masked_daddr = ntohl(pkt->ipv4_hdr.daddr) & (0xffffffff << (32 - ip_blks[i].prefix_len));
         uint32_t masked_ipblk = ntohl(ip_blks[i].addr_v4) & (0xffffffff << (32 - ip_blks[i].prefix_len));
         if (masked_daddr != masked_ipblk) continue;
+        if (pkt->ipv4_hdr.daddr < ip_blks[i].addr_v4) continue;
 
         return ip_blks[i].addr_v4;
     }
@@ -220,10 +217,12 @@ static inline bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* ad
             masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[0]) & (0xffffffff << (32 - ip_blks[i].prefix_len));
             masked_ipblk = ntohl(ip_blks[i].addr_v6[0]) & (0xffffffff << (32 - ip_blks[i].prefix_len));
             if (masked_daddr != masked_ipblk) continue;
+            if (pkt->ipv6_hdr.ip6_dst.s6_addr32[0] < ip_blks[i].addr_v6[0]) continue;
         } else {
             masked_daddr = pkt->ipv6_hdr.ip6_dst.s6_addr32[0];
             masked_ipblk = ip_blks[i].addr_v6[0];
             if (masked_daddr != masked_ipblk) continue;
+            if (pkt->ipv6_hdr.ip6_dst.s6_addr32[0] < ip_blks[i].addr_v6[0]) continue;
         }
 
         if (ip_blks[i].prefix_len > 32) {
@@ -231,10 +230,12 @@ static inline bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* ad
                 masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[1]) & (0xffffffff << (64 - ip_blks[i].prefix_len));
                 masked_ipblk = ntohl(ip_blks[i].addr_v6[1]) & (0xffffffff << (64 - ip_blks[i].prefix_len));
                 if (masked_daddr != masked_ipblk) continue;
+                if (pkt->ipv6_hdr.ip6_dst.s6_addr32[1] < ip_blks[i].addr_v6[1]) continue;
             } else {
                 masked_daddr = pkt->ipv6_hdr.ip6_dst.s6_addr32[1];
                 masked_ipblk = ip_blks[i].addr_v6[1];
                 if (masked_daddr != masked_ipblk) continue;
+                if (pkt->ipv6_hdr.ip6_dst.s6_addr32[1] < ip_blks[i].addr_v6[1]) continue;
             }
         }
 
@@ -243,16 +244,19 @@ static inline bool find_matching_ipv6_block(struct pkt* pkt, struct in6_addr* ad
                 masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[2]) & (0xffffffff << (96 - ip_blks[i].prefix_len));
                 masked_ipblk = ntohl(ip_blks[i].addr_v6[2]) & (0xffffffff << (96 - ip_blks[i].prefix_len));
                 if (masked_daddr != masked_ipblk) continue;
+                if (pkt->ipv6_hdr.ip6_dst.s6_addr32[2] < ip_blks[i].addr_v6[2]) continue;
 
             } else {
                 masked_daddr = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[2]);
                 masked_ipblk = ntohl(ip_blks[i].addr_v6[2]);
                 if (masked_daddr != masked_ipblk) continue;
+                if (pkt->ipv6_hdr.ip6_dst.s6_addr32[2] < ip_blks[i].addr_v6[2]) continue;
 
                 masked_daddr
                     = ntohl(pkt->ipv6_hdr.ip6_dst.s6_addr32[3]) & (0xffffffff << (128 - ip_blks[i].prefix_len));
                 masked_ipblk = ntohl(ip_blks[i].addr_v6[3]) & (0xffffffff << (128 - ip_blks[i].prefix_len));
                 if (masked_daddr != masked_ipblk) continue;
+                if (pkt->ipv6_hdr.ip6_dst.s6_addr32[3] < ip_blks[i].addr_v6[3]) continue;
             }
         }
 
@@ -562,9 +566,7 @@ static __attribute__((noreturn)) void* loop(void* arg) {
 
 int main(int argc, char* argv[]) {
     int cpus = sysconf(_SC_NPROCESSORS_ONLN);
-    if (cpus <= 0) {
-        cpus = 1;
-    }
+    if (cpus <= 0) { cpus = 1; }
 
     int       fds[cpus];
     pthread_t thread;
@@ -588,9 +590,7 @@ int main(int argc, char* argv[]) {
 
         if (0 == inet_pton(ip_blks[i - 1].af, argv[i], ip_blks[i - 1].addr)) DIE();
 
-        if (NULL != slash) {
-            slash[0] = '/';
-        }
+        if (NULL != slash) { slash[0] = '/'; }
 
         if_addr(ip_blks[i - 1].af, ip_blks[i - 1].addr, ip_blks[i - 1].prefix_len);
     }
