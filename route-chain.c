@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -82,6 +83,11 @@ static inline void tun_create(uint32_t cpus, int* fds) {
     if (0 > (fd = open("/dev/net/tun", O_RDWR))) DIE();
 
     memset(&ifr, 0, sizeof(ifr));
+
+    /* set tun dev name from env */
+    const char* env_ifname = getenv("IFNAME");
+    if (env_ifname != NULL) { strncpy(ifr.ifr_ifrn.ifrn_name, env_ifname, IFNAMSIZ); }
+
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
     if (0 > (ret = ioctl(fd, TUNSETIFF, (void*) &ifr))) DIE();
 

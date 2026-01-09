@@ -12,6 +12,10 @@ Run `./route-chain 192.168.0.1/24 192.0.0.1/24 fc00::/64 fd00::/64`.
 
 Any number of CIDRs is accepted as parameter.
 
+This will create a TUN device `tun0`.
+
+> If you want to specify interface name, set the IFNAME env var, e.g. `IFNAME=route-chain ./route-chain 192.168.0.1/24`.
+
 Then run `traceroute 192.0.0.10` (or any address in the CIDRs above), and you will get:
 
 ```bash
